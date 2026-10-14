@@ -1,0 +1,25 @@
+{
+  "//": "The parts of the AltStore source that do not change per release. scripts/altstore-source.py adds the rest -- the versions from a built IPA's identity, the appPermissions that identity demands, and the news item -- and writes altstore/site/source.json. Everything a URL here is relative to is resolved against the source's own base URL at publish time, so the same file works on any domain. releaseNotesRepo is ours, not AltStore's: it is where the per-version release notes are read from.",
+  "name": "spoti.pw",
+  "identifier": "pw.spoti.altstore",
+  "subtitle": "Liquid Glass for the Spotify iOS app",
+  "description": "Unofficial builds of spoti.pw, the no-jailbreak Spotify mod. Every release here is built from the source automatically and signed on install by AltStore or SideStore, which needs no jailbreak and no computer after setup. Release notes are the official spoti.pw ones.",
+  "website": "https://spoti.pw",
+  "tintColor": "1ED760",
+  "iconURL": "icon.png",
+  "featuredApps": ["com.spotify.client"],
+  "releaseNotesRepo": "skopevoj/spoti.pw",
+  "apps": [
+    {
+      "name": "spoti.pw",
+      "bundleIdentifier": "com.spotify.client",
+      "developerName": "darkksh",
+      "subtitle": "Spotify, in glass.",
+      "localizedDescription": "A no-jailbreak Theos tweak that rebuilds Spotify for iOS in Liquid Glass, injected into your own decrypted Spotify IPA. Built and tested on Spotify 9.1.78; the app installs over the real Spotify and keeps its bundle id.\n\nBuilt for iOS 26, where the redesigned UI is Liquid Glass. On iOS 16.1 to 25 the mod runs its native look instead: Spotify's own screens with everything else it adds on them. The Live Activity needs iOS 17.\n\nThis is an unofficial build of the mod published for AltStore and SideStore. It is not affiliated with Spotify, and no Spotify IPA is distributed with it. Support the mod's author at ko-fi.com/darkksh.",
+      "tintColor": "1ED760",
+      "iconURL": "icon.png",
+      "screenshotURLs": [],
+      "minOSVersion": "16.1"
+    }
+  ]
+}

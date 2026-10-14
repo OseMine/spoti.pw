@@ -1,0 +1,140 @@
+# Publishes the AltStore / SideStore source for every release.
+#
+# A release gives both the tweak's .deb (release.yml) and the source AltStore reads. This job builds
+# the same IPA the .deb comes from and:
+#
+#   1. stamps the release into its CFBundleVersion, which is the only thing that changes between
+#      releases (Spotify's own version and build number never do, so without this AltStore would
+#      never see an update) -- scripts/altstore-ipa.py
+#   2. uploads that IPA to Vercel Blob, which the source's downloadURL points at, because the IPA is
+#      larger than a Hobby static deployment may carry
+#   3. reads the IPA's identity (version, build version, sha256, entitlements, privacy strings) and
+#      writes altstore/site/source.json from it with the official release notes -- scripts/altstore-source.py
+#   4. deploys altstore/site to Vercel
+#
+# The source and the IPA are public; this repository is not. The IPA is unsigned: AltStore re-signs
+# it on install with the user's own certificate.
+name: AltStore source
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "Direct link to a decrypted Spotify IPA (defaults to the SPOTIFY_IPA_URL secret)"
+        required: false
+        type: string
+      mod_version:
+        description: "Mod version to publish (defaults to version.txt at the checked-out ref)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Two publishes would race for the same Blob pathname and the same source history.
+concurrency:
+  group: altstore-source
+  cancel-in-progress: false
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    steps:
+      # A release points at the tag, which is the commit Release Please wrote version.txt into.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - uses: levibostian/action-hide-sensitive-inputs@v1
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: actions/checkout@v5
+        with:
+          repository: theos/theos
+          path: theos
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          brew install make dpkg ldid
+          python3 -m pip install --break-system-packages git+https://github.com/asdfzxcvbn/pyzule-rw.git
+
+      # Same secret release.yml builds the .deb with, so both artifacts come from the same flag
+      # table. It is optional here: the IPA is in hand, so the pipeline can extract it itself.
+      - name: Flag table
+        env:
+          SG_FLAG_LIST: ${{ secrets.SG_FLAG_LIST }}
+        run: |
+          if [ -n "$SG_FLAG_LIST" ]; then
+            echo "$SG_FLAG_LIST" | base64 -d | gunzip > tweak/Sources/Shared/Flags/SGFlagList.m
+          else
+            echo "::warning::SG_FLAG_LIST is not set; the pipeline will extract the flag table from the IPA"
+          fi
+
+      - name: Download IPA
+        env:
+          SECRET_IPA_URL: ${{ secrets.SPOTIFY_IPA_URL }}
+          INPUT_IPA_URL: ${{ inputs.ipa_url }}
+        run: |
+          url="${INPUT_IPA_URL:-$SECRET_IPA_URL}"
+          [ -n "$url" ] || { echo "::error::no decrypted IPA: set the SPOTIFY_IPA_URL secret or pass ipa_url"; exit 1; }
+          mkdir -p ipa
+          curl -fsSL "$url" -o ipa/spotify.ipa
+          case "$(file --mime-type -b ipa/spotify.ipa)" in application/zip|application/x-ios-app) ;; *) echo "::error::Not an IPA"; exit 1 ;; esac
+
+      - run: make release
+
+      - name: Stamp the release's build number and read the IPA's identity
+        id: identity
+        run: |
+          MOD_VERSION="${{ inputs.mod_version }}"
+          [ -n "$MOD_VERSION" ] || MOD_VERSION="$(cat version.txt)"
+          IPA="$(ls out/*.ipa | head -1)"
+          echo "mod_version=$MOD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "ipa=$IPA" >> "$GITHUB_OUTPUT"
+          # --stamp-release rewrites CFBundleVersion in the app and every extension *before* the
+          # identity is read, so the sha256 and size below belong to the bytes that get uploaded.
+          python3 scripts/altstore-ipa.py "$IPA" --stamp-release "$MOD_VERSION" > identity.json
+          python3 scripts/altstore-ipa.py "$IPA" --summary
+
+      - name: Upload the IPA to Vercel Blob
+        id: blob
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+        run: |
+          npm ci --prefix altstore
+          URL="$(node altstore/publish.mjs "${{ steps.identity.outputs.ipa }}" "spoti.pw-${{ steps.identity.outputs.mod_version }}.ipa")"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### spoti.pw ${{ steps.identity.outputs.mod_version }}"
+            echo
+            echo "IPA: $URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write source.json
+        env:
+          BASE_URL: ${{ vars.ALTSTORE_BASE_URL }}
+        run: |
+          previous=()
+          [ -n "$BASE_URL" ] && previous=(--previous "${BASE_URL%/}/source.json")
+          python3 scripts/altstore-source.py identity.json \
+            --download-url "${{ steps.blob.outputs.url }}" \
+            --mod-version "${{ steps.identity.outputs.mod_version }}" \
+            --base-url "$BASE_URL" \
+            "${previous[@]}"
+
+      - name: Deploy the source site
+        working-directory: altstore/site
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx --yes vercel@latest deploy --prod --yes

@@ -13,6 +13,9 @@ tweak/.theos/
 tweak/obj/
 tweak/packages/
 tweak/Sources/Shared/Flags/SGFlagList.m
+altstore/node_modules/
+altstore/site/source.json
+.vercel/
 /trees/continuous
 /trees/clean
 harness/*/build/
