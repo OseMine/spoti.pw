@@ -71,10 +71,18 @@ Given the release, it checks out the tag, builds the same IPA the `.deb` comes f
 4. The new `source.json` is committed to `main` as `chore(altstore): source.json for <version>
    [skip ci]`. Vercel builds the push and the source updates.
 
-Trigger it by hand (`workflow_dispatch`) to publish or republish a version: `tag` says which release
-to publish into (default `v<version.txt>`), `ipa_url` overrides `SPOTIFY_IPA_URL`, and `mod_version`
-overrides `version.txt`. The release has to exist, since the IPA is attached to it. Re-running a
-version is safe — the release asset is clobbered and the version entry it produces replaces its own.
+Trigger it by hand (`workflow_dispatch`) to publish or republish a version:
+
+| input | what it is |
+| --- | --- |
+| `tag` | the release to publish into, `v0.22.0`; it must be a tag in the repository, and the release is created for it if it has none (default `v<version.txt>`) |
+| `ref` | what to build, when that is not the tag's tree — this is how a version whose tag predates the tooling gets published: `tag` `v0.22.0` with `ref` `main` |
+| `ipa_url` | overrides `SPOTIFY_IPA_URL` |
+| `mod_version` | overrides `version.txt` at the built ref |
+
+Re-running a version is safe — the release asset is clobbered and the version entry it produces
+replaces its own. A release this creates is made with `GITHUB_TOKEN`, so it starts no workflow of its
+own and the `release: published` trigger above stays quiet.
 
 ## The build number
 

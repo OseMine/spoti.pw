@@ -43,6 +43,10 @@ on:
         description: "The release to publish into (defaults to v<version.txt>)"
         required: false
         type: string
+      ref:
+        description: "What to build (defaults to the tag's tree); pass main to build a tree that has no tag yet"
+        required: false
+        type: string
       ipa_url:
         description: "Direct link to a decrypted Spotify IPA (defaults to the SPOTIFY_IPA_URL secret)"
         required: false
@@ -67,10 +71,23 @@ jobs:
   publish:
     runs-on: macos-latest
     steps:
-      # The release's tag is the commit Release Please wrote version.txt into.
+      # The checkout below dies on a tag that does not exist with a bare git error, which is a
+      # confusing way to learn the release is not there; say so first. Empty unless a dispatch named
+      # one: a release event and release.yml both point at a release that exists.
+      - name: The tag has to be a tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [ -n "$TAG" ] || { echo "no tag named; the triggering release names its own"; exit 0; }
+          git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" > /dev/null || {
+            echo "::error::$TAG is not a tag in this repository. The source is built from a release tag, and the IPA is attached to its release: tag a version (v0.22.0) or run a release first."; exit 1; }
+
+      # The release's tag is the commit Release Please wrote version.txt into. ref overrides what is
+      # built, for publishing a version whose tag predates the tooling in this workflow: tag v0.22.0
+      # names the release, ref main says build what main holds.
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
+          ref: ${{ inputs.ref || inputs.tag || github.event.release.tag_name || github.ref }}
 
       - uses: levibostian/action-hide-sensitive-inputs@v1
 
@@ -146,8 +163,14 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           asset="spoti.pw-${{ steps.release.outputs.mod_version }}.ipa"
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null || {
-            echo "::error::no $TAG release to attach the IPA to; publish the release first"; exit 1; }
+          # A release event and release.yml both hand us a release that is already there. A dispatch
+          # may name a tag whose release was never cut -- then this is where it gets one, which is why
+          # the asset goes up before source.json is written: the entry has to point at something real.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || \
+            gh release create "$TAG" --verify-tag \
+              --title "spoti.pw ${{ steps.release.outputs.mod_version }}" \
+              --notes "Built from \`$TAG\`. The mod's own release notes are at https://github.com/skopevoj/spoti.pw/releases/tag/$TAG." \
+              --repo "$GITHUB_REPOSITORY"
           cp "${{ steps.identity.outputs.ipa }}" "$asset"
           gh release upload "$TAG" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$asset"
@@ -172,13 +195,15 @@ jobs:
 
       - name: Commit source.json
         run: |
-          if [ -z "$(git status --porcelain -- altstore/site/source.json)" ]; then
+          # --ignored: an older tag still ignores source.json, so "no changes" and "not added yet"
+          # have to be told apart there too.
+          if [ -z "$(git status --porcelain --ignored -- altstore/site/source.json)" ]; then
             echo "source.json is unchanged; nothing to commit"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add altstore/site/source.json
+          git add -f altstore/site/source.json
           # A chore, so Release Please leaves the release alone. Vercel does not read [skip ci]: it
           # builds this push, which is the deploy. (A push made with GITHUB_TOKEN starts no workflow
           # of its own, Release Please's included, so the marker is belt and braces.)
