@@ -1,9 +1,0 @@
-{
-  "//": "The publishing kit's one runtime dependency. altstore/publish.mjs imports it, so this file sits beside that script rather than at the repo root, where nothing else is Node.",
-  "name": "spoti.pw-altstore",
-  "private": true,
-  "description": "Uploads the built spoti.pw IPA to Vercel Blob, where the AltStore source points for its downloadURL.",
-  "dependencies": {
-    "@vercel/blob": "2.8.2"
-  }
-}

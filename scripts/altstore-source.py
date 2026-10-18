@@ -9,7 +9,7 @@
     --mod-version V    the mod's version      (version.txt)
     --notes TEXT       release notes          (fetched from the official repo by default)
     --date ISO8601     the version's date     (the official release's, else now)
-    --previous URL|PATH  a published source.json whose history is kept
+    --previous URL|PATH  a source.json whose history is kept (altstore/site/source.json)
     --keep N           how many versions to publish (10)
 
 <identity.json> is what scripts/altstore-ipa.py prints for the IPA being published, so the version
@@ -167,7 +167,8 @@ def main():
 
     # Carry the releases already published, so the source keeps its history across refreshes. An
     # entry is identified the way AltStore's AppVersion is unique, so a republished build replaces
-    # its own entry rather than adding a second.
+    # its own entry rather than adding a second. The file the workflow commits is the history: it is
+    # read from the checkout rather than from the deployed site.
     ref = args.get("previous")
     previous = []
     if ref:

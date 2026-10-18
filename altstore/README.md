@@ -5,33 +5,27 @@ so the source and the IPA have to agree. Reading `appPermissions` out of the sam
 published is what makes them agree; nothing about the source is maintained by hand.
 
 The mod is installed from a source URL rather than a GitHub release, so it can update itself: the
-repository stays private, and what is public is only `source.json` and the IPA it points at, both
-served from Vercel.
+IPA is attached to the release, and `source.json` is served from Vercel.
 
 ## What lives here
 
     altstore/app.json               the parts of the source that do not change per release
-    altstore/publish.mjs            uploads the IPA to Vercel Blob, prints its public URL
-    altstore/package.json           @vercel/blob, pinned (the only Node in the repo)
     altstore/site/                  what Vercel serves: index.html, icon.png, vercel.json, and the
-                                    source.json the workflow writes there (gitignored)
+                                    source.json the workflow commits
     scripts/altstore-ipa.py         reads the identity AltStore checks, and stamps CFBundleVersion
     scripts/altstore-source.py      writes source.json from app.json + identity + release notes
     .github/workflows/altstore.yml  all of it, on every published release
 
-`source.json` is generated, never committed: the history it keeps is read back from the published
-copy, so the live site is the only state.
+There is nothing to upload anywhere and nothing to keep in step by hand: every release commits the
+new `source.json`, and the push is what deploys the site.
 
 ## One-time setup
 
-**A Vercel project** for the site: import the repo, name it what the address should be (a project
-called `spoti-pw-altstore` answers at `spoti-pw-altstore.vercel.app`), set the root directory to
-`altstore/site`, and leave the framework and build command empty — it is static files. The workflow
-passes `--cwd altstore/site` itself, so the setting only matters if you also connect Git.
-
-**A Vercel Blob store** for the IPAs. They are larger than a Hobby static deployment carries (100 MB),
-and Blob takes multipart uploads. Connect the store to the project; that is what puts
-`BLOB_READ_WRITE_TOKEN` in the project's environment.
+**A Vercel project** for the site: import the repository, name it what the address should be (a
+project called `spoti-pw-altstore` answers at `spoti-pw-altstore.vercel.app`), set the root directory
+to `altstore/site`, and leave the framework and build command empty — it is static files. Connect
+Git, so a push to `main` deploys; the workflow commits `source.json` rather than deploying, so
+nothing else is needed here.
 
 **Secrets** (repository → Settings → Secrets and variables → Actions):
 
@@ -39,14 +33,20 @@ and Blob takes multipart uploads. Connect the store to the project; that is what
 | --- | --- |
 | `SPOTIFY_IPA_URL` | a direct link to a decrypted Spotify IPA, fetched with `curl -fL` and no auth — put a token in the URL if it needs one |
 | `SG_FLAG_LIST` | the flag table from a real Spotify binary, the same secret `release.yml` uses (`gzip -9c tweak/Sources/Shared/Flags/SGFlagList.m \| base64 \| gh secret set SG_FLAG_LIST`); optional here, since the IPA is available to extract it from |
-| `VERCEL_TOKEN` | vercel.com/account/tokens |
-| `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | from `.vercel/project.json` after `vercel link` in `altstore/site` (`orgId`, `projectId`) |
-| `BLOB_READ_WRITE_TOKEN` | the Blob store's read/write token |
 
-**A variable** (same page, Variables tab): `ALTSTORE_BASE_URL`, the site's own URL, with the
-trailing slash (`https://spoti-pw-altstore.vercel.app/`). It resolves the source's relative
-`iconURL` and is where the previous `source.json` is fetched from for history, so a wrong value
-means no history rather than a failed release.
+**A variable** (same page, Variables tab), only if the site is on a custom domain: `ALTSTORE_BASE_URL`,
+the site's own URL with the trailing slash (`https://altstore.spoti.pw/`). It resolves the source's
+relative `iconURL`; unset, it is the Vercel address `altstore-source.py` defaults to.
+
+## Why the IPA is a release asset
+
+It is the only public place it fits. A Vercel Hobby deployment carries 100 MB and the IPA is
+bigger, and GitHub refuses any file over 100 MB, so it cannot be deployed and it cannot be in the
+repository — where it would also sit in history forever, one copy per release. Release assets hold
+2 GB without complaint and download without a token, which is what AltStore needs. **This is why the
+repository has to stay public**: a private repository's release assets need authentication, and
+AltStore sends none. If it ever goes private, the IPA needs a host of its own (Vercel Blob, say) and
+`--download-url` points at that instead.
 
 ## What a release does
 
@@ -56,14 +56,17 @@ IPA the `.deb` comes from and then:
 1. `scripts/altstore-ipa.py out/*.ipa --stamp-release <version>` stamps the release's
    `CFBundleVersion` into the app and every `*.appex`, and prints the resulting identity as JSON —
    `version`, `buildVersion`, `size`, `sha256`, `entitlements`, `privacy`.
-2. `altstore/publish.mjs` uploads that IPA to Blob as `spoti.pw-<version>.ipa`.
+2. `gh release upload` attaches that IPA to the release as `spoti.pw-<version>.ipa`.
 3. `scripts/altstore-source.py` writes `altstore/site/source.json` from `altstore/app.json`, the
-   identity, the official release notes for the same version, and the history already published.
-4. `vercel deploy --prod --cwd altstore/site` publishes it.
+   identity, the official release notes for the same version, and the `source.json` already
+   committed — which is the history it keeps. Nothing is read back from the live site.
+4. The new `source.json` is committed to `main` as `chore(altstore): source.json for <version>
+   [skip ci]`. Vercel builds the push and the source updates.
 
 Trigger it by hand (`workflow_dispatch`) to test: `ipa_url` overrides `SPOTIFY_IPA_URL`, and
-`mod_version` overrides `version.txt`. Re-running a version is safe — the Blob pathname is stable,
-and the version entry it produces replaces its own.
+`mod_version` overrides `version.txt`. It publishes into the release for that version (`v<version>`),
+so the release has to exist. Re-running a version is safe — the release asset is clobbered and the
+version entry it produces replaces its own.
 
 ## The build number
 
@@ -81,18 +84,15 @@ values into them, and a mismatch there is a source AltStore refuses.
 
 ## Testing locally
 
-    npm ci --prefix altstore
-    node altstore/publish.mjs out/spoti.pw-0.22.0.ipa spoti.pw-0.22.0.ipa      # prints the URL
     python scripts/altstore-ipa.py out/spoti.pw-0.22.0.ipa --summary
     python scripts/altstore-ipa.py out/spoti.pw-0.22.0.ipa --stamp-release 0.22.0 > /tmp/identity.json
     python scripts/altstore-source.py /tmp/identity.json \
-      --download-url "https://<store>.public.blob.vercel-storage.com/spoti.pw-0.22.0.ipa" \
-      --previous "https://<address>/source.json"
+      --download-url "https://github.com/<owner>/<repo>/releases/download/v0.22.0/spoti.pw-0.22.0.ipa" \
+      --previous altstore/site/source.json
 
-`publish.mjs` needs `BLOB_READ_WRITE_TOKEN` in the environment; `altstore-source.py` fetches the
-notes from `skopevoj/spoti.pw` anonymously, or uses `--notes`. Both are also useful on their own:
-`--stamp-release`/`--set-build-version` for an IPA you built by hand, and the identity JSON for
-seeing exactly what AltStore will check before publishing.
+`altstore-source.py` fetches the notes from `skopevoj/spoti.pw` anonymously, or uses `--notes`.
+Both scripts are also useful on their own: `--stamp-release`/`--set-build-version` for an IPA you
+built by hand, and the identity JSON for seeing exactly what AltStore will check before publishing.
 
 `source.json` is validated by AltStore's own decoder: every URL has to be absolute, `version` and
 `buildVersion` have to equal the IPA's, `sha256` is verified against the download, and every

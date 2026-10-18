@@ -31,7 +31,7 @@
                                 tweak links (its README names the upstream commits and the licenses)
     ipa/, out/                  decrypted Spotify IPA in, built IPAs out (both gitignored)
     altstore/                   the AltStore/SideStore source a release publishes, and its kit (see
-                                altstore/README.md); the source and IPA are public, this repo is not
+                                altstore/README.md)
 
 `tweak/Sources/Shared/Flags/SGFlagList.m` is generated from the IPA and gitignored, as are the
 recorded trees: both are read out of Spotify's own binary and belong to whoever built them.
@@ -248,10 +248,10 @@ and Live Activity. The root page in `App/ModSettings.x` holds the Appearance car
 ## AltStore source
 
 Every release is also published as an AltStore or SideStore source, which then updates the mod on
-its own; `altstore/README.md` has the setup and what the workflow does. The source and the IPA it
-points at are public and served from Vercel while the repository stays private, and both are
-generated from the IPA the release builds: `scripts/altstore-ipa.py` reads the identity AltStore
-checks and stamps the release's build number, `scripts/altstore-source.py` writes `source.json`.
+its own; `altstore/README.md` has the setup and what the workflow does. Both halves are generated
+from the IPA the release builds: `scripts/altstore-ipa.py` reads the identity AltStore checks and
+stamps the release's build number, `scripts/altstore-source.py` writes `source.json`, the workflow
+attaches the IPA to the release and commits `source.json` for Vercel to serve.
 
 ## Mod Settings
 

@@ -6,14 +6,21 @@
 #   1. stamps the release into its CFBundleVersion, which is the only thing that changes between
 #      releases (Spotify's own version and build number never do, so without this AltStore would
 #      never see an update) -- scripts/altstore-ipa.py
-#   2. uploads that IPA to Vercel Blob, which the source's downloadURL points at, because the IPA is
-#      larger than a Hobby static deployment may carry
+#   2. attaches that IPA to the release, next to the .deb, which is where AltStore downloads it from
 #   3. reads the IPA's identity (version, build version, sha256, entitlements, privacy strings) and
-#      writes altstore/site/source.json from it with the official release notes -- scripts/altstore-source.py
-#   4. deploys altstore/site to Vercel
+#      writes altstore/site/source.json from it with the official release notes
+#      -- scripts/altstore-source.py
+#   4. commits source.json to main, which is what deploys the site: Vercel builds altstore/site on
+#      every push. The source is committed, not published behind Vercel's back, so the repository is
+#      the whole state of it.
 #
-# The source and the IPA are public; this repository is not. The IPA is unsigned: AltStore re-signs
-# it on install with the user's own certificate.
+# The IPA is a release asset because that is the only public place it fits: it is over GitHub's
+# 100 MB per-file limit, it would sit in this repository's history forever, and a Vercel Hobby
+# deployment (100 MB) is too small to carry it. Release assets are downloadable without a token, so
+# this needs no other host -- but only while this repository is public: a private repository's
+# assets demand authentication, and AltStore sends none.
+#
+# The IPA is unsigned: AltStore re-signs it on install with the user's own certificate.
 name: AltStore source
 
 on:
@@ -31,9 +38,9 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
-# Two publishes would race for the same Blob pathname and the same source history.
+# Two publishes would race for the same release asset and the same source.json.
 concurrency:
   group: altstore-source
   cancel-in-progress: false
@@ -92,49 +99,74 @@ jobs:
 
       - run: make release
 
+      - name: Resolve the version and the release it is published into
+        id: release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.mod_version }}
+        run: |
+          version="$INPUT_VERSION"
+          [ -n "$version" ] || version="$(cat version.txt)"
+          tag="$TAG"
+          [ -n "$tag" ] || tag="v$version"
+          echo "mod_version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Stamp the release's build number and read the IPA's identity
         id: identity
         run: |
-          MOD_VERSION="${{ inputs.mod_version }}"
-          [ -n "$MOD_VERSION" ] || MOD_VERSION="$(cat version.txt)"
           IPA="$(ls out/*.ipa | head -1)"
-          echo "mod_version=$MOD_VERSION" >> "$GITHUB_OUTPUT"
           echo "ipa=$IPA" >> "$GITHUB_OUTPUT"
           # --stamp-release rewrites CFBundleVersion in the app and every extension *before* the
           # identity is read, so the sha256 and size below belong to the bytes that get uploaded.
-          python3 scripts/altstore-ipa.py "$IPA" --stamp-release "$MOD_VERSION" > identity.json
+          python3 scripts/altstore-ipa.py "$IPA" --stamp-release "${{ steps.release.outputs.mod_version }}" > identity.json
           python3 scripts/altstore-ipa.py "$IPA" --summary
 
-      - name: Upload the IPA to Vercel Blob
-        id: blob
+      - name: Attach the IPA to the release
+        id: ipa
         env:
-          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
-          npm ci --prefix altstore
-          URL="$(node altstore/publish.mjs "${{ steps.identity.outputs.ipa }}" "spoti.pw-${{ steps.identity.outputs.mod_version }}.ipa")"
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          asset="spoti.pw-${{ steps.release.outputs.mod_version }}.ipa"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null || {
+            echo "::error::no $TAG release to attach the IPA to; publish the release first"; exit 1; }
+          cp "${{ steps.identity.outputs.ipa }}" "$asset"
+          gh release upload "$TAG" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$asset"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
           {
-            echo "### spoti.pw ${{ steps.identity.outputs.mod_version }}"
+            echo "### spoti.pw ${{ steps.release.outputs.mod_version }}"
             echo
-            echo "IPA: $URL"
+            echo "IPA: $url"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Read back from the checkout, not from the deployed site: what was committed is the history
+      # the next release keeps.
       - name: Write source.json
         env:
           BASE_URL: ${{ vars.ALTSTORE_BASE_URL }}
         run: |
-          previous=()
-          [ -n "$BASE_URL" ] && previous=(--previous "${BASE_URL%/}/source.json")
           python3 scripts/altstore-source.py identity.json \
-            --download-url "${{ steps.blob.outputs.url }}" \
-            --mod-version "${{ steps.identity.outputs.mod_version }}" \
+            --download-url "${{ steps.ipa.outputs.url }}" \
+            --mod-version "${{ steps.release.outputs.mod_version }}" \
             --base-url "$BASE_URL" \
-            "${previous[@]}"
+            --previous altstore/site/source.json
 
-      - name: Deploy the source site
-        working-directory: altstore/site
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: npx --yes vercel@latest deploy --prod --yes
+      - name: Commit source.json
+        run: |
+          if [ -z "$(git status --porcelain -- altstore/site/source.json)" ]; then
+            echo "source.json is unchanged; nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add altstore/site/source.json
+          # A chore, so Release Please leaves the release alone, and [skip ci] so this push sets no
+          # further run going. Vercel does not read [skip ci]: it builds this push, which is the
+          # deploy.
+          git commit -m "chore(altstore): source.json for ${{ steps.release.outputs.mod_version }} [skip ci]"
+          # The tag this checked out is a commit on main, but main may have moved on since.
+          git fetch origin main
+          git rebase --autostash origin/main
+          git push origin HEAD:main
