@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.0](https://github.com/OseMine/spoti.pw/compare/v0.22.0...v0.23.0) (2026-10-18)
+
+
+### Features
+
+* an AltStore source that updates the mod, published on every release ([7d05ad2](https://github.com/OseMine/spoti.pw/commit/7d05ad23d7cce5caf2b01451849d0b43a2ab142f))
+
+
+### Fixes
+
+* **altstore:** make a hand-published version possible, and say so when the tag is missing ([0268e74](https://github.com/OseMine/spoti.pw/commit/0268e743c47bdd6dff340021e5def47cfff5eb76))
+* **altstore:** publish the source from release.yml, not from release: published ([6930800](https://github.com/OseMine/spoti.pw/commit/6930800672c96c6cab4b7c6f3da61cd921a9fabd))
+* Remove leftover debug line that reshows update notice every launch ([425d68b](https://github.com/OseMine/spoti.pw/commit/425d68bc1761e90a6b5828864720511bcef79fa9))
+
 ## [0.22.0](https://github.com/skopevoj/spoti.pw/compare/v0.21.1...v0.22.0) (2026-09-23)
 
 
