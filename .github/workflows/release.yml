@@ -1,6 +1,9 @@
 # Every push to main updates one release PR (version.txt and CHANGELOG.md from the feat:/fix:
-# commits since the last release). Merging it tags vX.Y.Z and makes the GitHub Release, and the
-# second job builds the tweak's .deb and attaches it. No IPA is built or published here.
+# commits since the last release). Merging it tags vX.Y.Z and makes the GitHub Release, and the jobs
+# that need the release then run: the .deb is built and attached here, and the AltStore source is
+# published by altstore.yml, which this workflow calls. Both hang off release-please's output rather
+# than `release: published`, because a release this workflow makes with GITHUB_TOKEN starts no other
+# workflow -- that event would never fire on its own.
 name: Release
 
 on:
@@ -59,3 +62,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ needs.release-please.outputs.tag }}" tweak/packages/*.deb --clobber
+
+  # The AltStore / SideStore source for the release: the IPA on the release, source.json committed.
+  # See altstore/README.md. A reusable workflow rather than a `release: published` trigger, for the
+  # reason in the header comment.
+  altstore:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/altstore.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag }}
+    secrets: inherit

@@ -32,7 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-DEFAULT_BASE_URL = "https://spoti-pw-altstore.vercel.app/"
+DEFAULT_BASE_URL = "https://spotipw-site.vercel.app/"
 DEFAULT_KEEP = 10
 NOTEBOOK = "https://github.com/{repo}/releases"
 

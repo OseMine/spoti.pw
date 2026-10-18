@@ -14,7 +14,7 @@ IPA is attached to the release, and `source.json` is served from Vercel.
                                     source.json the workflow commits
     scripts/altstore-ipa.py         reads the identity AltStore checks, and stamps CFBundleVersion
     scripts/altstore-source.py      writes source.json from app.json + identity + release notes
-    .github/workflows/altstore.yml  all of it, on every published release
+    .github/workflows/altstore.yml  all of it, as a reusable workflow release.yml calls
 
 There is nothing to upload anywhere and nothing to keep in step by hand: every release commits the
 new `source.json`, and the push is what deploys the site.
@@ -22,10 +22,13 @@ new `source.json`, and the push is what deploys the site.
 ## One-time setup
 
 **A Vercel project** for the site: import the repository, name it what the address should be (a
-project called `spoti-pw-altstore` answers at `spoti-pw-altstore.vercel.app`), set the root directory
-to `altstore/site`, and leave the framework and build command empty — it is static files. Connect
-Git, so a push to `main` deploys; the workflow commits `source.json` rather than deploying, so
-nothing else is needed here.
+project called `spotipw-site` answers at `spotipw-site.vercel.app`), set the root directory to
+`altstore/site`, and leave the framework and build command empty — it is static files. Connect Git,
+so a push to `main` deploys; the workflow commits `source.json` rather than deploying, so nothing
+else is needed here.
+
+Note that `source.json` only appears after the first release is published — until then the address
+serves the page and its icon, and `source.json` is a 404.
 
 **Secrets** (repository → Settings → Secrets and variables → Actions):
 
@@ -50,8 +53,13 @@ AltStore sends none. If it ever goes private, the IPA needs a host of its own (V
 
 ## What a release does
 
-`.github/workflows/altstore.yml` runs on `release: published`, checks out the tag, builds the same
-IPA the `.deb` comes from and then:
+`.github/workflows/release.yml` calls `.github/workflows/altstore.yml` as a reusable workflow from
+the job that runs when Release Please has cut a release. It is called rather than triggered by
+`release: published` because a workflow's `GITHUB_TOKEN` starts no other workflow: the release
+Release Please makes would never fire that event. (The trigger is still there for a release published
+by hand, and `workflow_dispatch` republishes a version.)
+
+Given the release, it checks out the tag, builds the same IPA the `.deb` comes from and then:
 
 1. `scripts/altstore-ipa.py out/*.ipa --stamp-release <version>` stamps the release's
    `CFBundleVersion` into the app and every `*.appex`, and prints the resulting identity as JSON —
@@ -63,10 +71,10 @@ IPA the `.deb` comes from and then:
 4. The new `source.json` is committed to `main` as `chore(altstore): source.json for <version>
    [skip ci]`. Vercel builds the push and the source updates.
 
-Trigger it by hand (`workflow_dispatch`) to test: `ipa_url` overrides `SPOTIFY_IPA_URL`, and
-`mod_version` overrides `version.txt`. It publishes into the release for that version (`v<version>`),
-so the release has to exist. Re-running a version is safe — the release asset is clobbered and the
-version entry it produces replaces its own.
+Trigger it by hand (`workflow_dispatch`) to publish or republish a version: `tag` says which release
+to publish into (default `v<version.txt>`), `ipa_url` overrides `SPOTIFY_IPA_URL`, and `mod_version`
+overrides `version.txt`. The release has to exist, since the IPA is attached to it. Re-running a
+version is safe — the release asset is clobbered and the version entry it produces replaces its own.
 
 ## The build number
 

@@ -250,8 +250,9 @@ and Live Activity. The root page in `App/ModSettings.x` holds the Appearance car
 Every release is also published as an AltStore or SideStore source, which then updates the mod on
 its own; `altstore/README.md` has the setup and what the workflow does. Both halves are generated
 from the IPA the release builds: `scripts/altstore-ipa.py` reads the identity AltStore checks and
-stamps the release's build number, `scripts/altstore-source.py` writes `source.json`, the workflow
-attaches the IPA to the release and commits `source.json` for Vercel to serve.
+stamps the release's build number, `scripts/altstore-source.py` writes `source.json`, and
+`.github/workflows/altstore.yml` — which `release.yml` calls once Release Please has made the release
+— attaches the IPA to it and commits `source.json` for Vercel to serve.
 
 ## Mod Settings
 

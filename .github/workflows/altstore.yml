@@ -1,7 +1,12 @@
-# Publishes the AltStore / SideStore source for every release.
+# Publishes the AltStore / SideStore source for a release.
 #
-# A release gives both the tweak's .deb (release.yml) and the source AltStore reads. This job builds
-# the same IPA the .deb comes from and:
+# .github/workflows/release.yml calls this as a reusable workflow from the job that runs when Release
+# Please has cut a release, and that is why it is not simply triggered by `release: published`: a
+# workflow's GITHUB_TOKEN does not start other workflows, and Release Please creates the release with
+# GITHUB_TOKEN, so that trigger alone would never fire. The trigger is kept for a release published
+# by hand (which GITHUB_TOKEN is not behind), and workflow_dispatch republishes a version.
+#
+# Given the release, it builds the same IPA the .deb comes from and:
 #
 #   1. stamps the release into its CFBundleVersion, which is the only thing that changes between
 #      releases (Spotify's own version and build number never do, so without this AltStore would
@@ -26,8 +31,18 @@ name: AltStore source
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: "The release to publish into, e.g. v0.23.0"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
+      tag:
+        description: "The release to publish into (defaults to v<version.txt>)"
+        required: false
+        type: string
       ipa_url:
         description: "Direct link to a decrypted Spotify IPA (defaults to the SPOTIFY_IPA_URL secret)"
         required: false
@@ -52,10 +67,10 @@ jobs:
   publish:
     runs-on: macos-latest
     steps:
-      # A release points at the tag, which is the commit Release Please wrote version.txt into.
+      # The release's tag is the commit Release Please wrote version.txt into.
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
 
       - uses: levibostian/action-hide-sensitive-inputs@v1
 
@@ -102,12 +117,14 @@ jobs:
       - name: Resolve the version and the release it is published into
         id: release
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
           INPUT_VERSION: ${{ inputs.mod_version }}
         run: |
           version="$INPUT_VERSION"
           [ -n "$version" ] || version="$(cat version.txt)"
-          tag="$TAG"
+          tag="$INPUT_TAG"
+          [ -n "$tag" ] || tag="$EVENT_TAG"
           [ -n "$tag" ] || tag="v$version"
           echo "mod_version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -162,9 +179,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add altstore/site/source.json
-          # A chore, so Release Please leaves the release alone, and [skip ci] so this push sets no
-          # further run going. Vercel does not read [skip ci]: it builds this push, which is the
-          # deploy.
+          # A chore, so Release Please leaves the release alone. Vercel does not read [skip ci]: it
+          # builds this push, which is the deploy. (A push made with GITHUB_TOKEN starts no workflow
+          # of its own, Release Please's included, so the marker is belt and braces.)
           git commit -m "chore(altstore): source.json for ${{ steps.release.outputs.mod_version }} [skip ci]"
           # The tag this checked out is a commit on main, but main may have moved on since.
           git fetch origin main
